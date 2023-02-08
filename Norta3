@@ -1,0 +1,45 @@
+def fit_NORTA3(EX, CovX, d, F_invs=None, mc_samples=1E6, seed=0, output_flag=0, n_proc=4):
+    """
+    Computes covariance matrix for NORTA procedure in an exact, non data-driven context
+    
+    Args:
+        EX: expected value of the d-dimensional vectors, assume
+        CovX: covariance matrix of the d-dimensional vector
+        d (int): dimension of the random vector.
+        F_invs (list of func): optional parameter to specify the marginal
+            distributions. Each function must support vector operations.
+            Default is None, which constructs the marginals from the data.
+        mc_samples(int): number of samples used in the Monte Carlo integration.
+        seed (int): seed for the random generator in NORTA
+        output_flag (int): 0 no output; 1 debug output
+        n_proc (int): num of processor to parallelize norta
+    Return:
+        NORTA_GEN (NORTA): an object that stores the necessary information to
+            generate NORTA random vectors.
+    """
+    global OUTPUT
+    global MC_SAMPLES
+    OUTPUT = output_flag
+    MC_SAMPLES = mc_samples
+    assert n_proc > 0, "Number of processors is positive and integer."
+    
+    if OUTPUT == 1:
+        print("Starting NORTA fitting")
+        print("Finding %i correlation terms" % (int(d * (d - 1) / 2)))
+    C = None  # matrix for NORTA
+    
+    VarX = np.diag(np.diag(CovX))
+    working_pool = mp.Pool(n_proc)
+    D = np.eye(d)
+    ij_pairs = [(i, j) for i in range(d) for j in range(i + 1, d)]
+    mp_data = product(ij_pairs, [F_invs], [CovX], [EX])
+    ij_rho_z = working_pool.map(find_rho_z, mp_data)
+    for ix, (i, j) in enumerate(ij_pairs):
+        D[i, j] = ij_rho_z[ix]
+        D[j, i] = D[i, j]        
+    # Finds the closest positive definte matrix to the one obtained by NORTA
+    D2 = nearestPD(D)
+    C = cholesky(D2, lower=True)
+    working_pool.terminate()
+    NORTA_GEN = NORTA(F_invs, C, seed)
+    return NORTA_GEN
